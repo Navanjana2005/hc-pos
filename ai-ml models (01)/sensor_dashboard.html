@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HC-POS | Live Sensor Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Design System ─────────────────────────────────── */
+    :root {
+      --bg-0:      #0a0e1a;
+      --bg-1:      #111827;
+      --bg-2:      #1a2236;
+      --bg-3:      #1e293b;
+      --border:    rgba(255,255,255,0.07);
+      --text-1:    #f1f5f9;
+      --text-2:    #94a3b8;
+      --text-3:    #475569;
+      --accent:    #6366f1;
+      --accent-g:  #8b5cf6;
+      --green:     #22c55e;
+      --yellow:    #eab308;
+      --red:       #ef4444;
+      --solar:     #f59e0b;
+      --power:     #6366f1;
+      --current:   #22d3ee;
+      --voltage:   #a78bfa;
+      --battery:   #34d399;
+      --radius:    14px;
+      --shadow:    0 4px 32px rgba(0,0,0,0.45);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-0);
+      color: var(--text-1);
+      min-height: 100vh;
+      padding: 0 0 48px;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(16px);
+    }
+
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-g));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .logo-text h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .logo-text p  { font-size: 12px; color: var(--text-2); font-weight: 400; }
+
+    .conn-badge {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg-2);
+      font-size: 13px; font-weight: 500;
+      transition: all 0.3s;
+    }
+    .conn-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 6px var(--red);
+      transition: all 0.3s;
+    }
+    .conn-badge.live .conn-dot {
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite;
+    }
+    .conn-badge.live { border-color: rgba(34,197,94,0.3); }
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: 0.5; }
+    }
+
+    /* ── Main layout ──────────────────────────────────── */
+    main { max-width: 1280px; margin: 0 auto; padding: 32px 24px 0; }
+
+    .section-label {
+      font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+      text-transform: uppercase; color: var(--text-3);
+      margin-bottom: 12px;
+    }
+
+    /* ── Metric cards grid ───────────────────────────── */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: var(--card-color, var(--accent));
+    }
+
+    .card-icon {
+      font-size: 22px; margin-bottom: 14px;
+      width: 44px; height: 44px;
+      background: color-mix(in srgb, var(--card-color, var(--accent)) 15%, transparent);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .card-label { font-size: 12px; color: var(--text-2); font-weight: 500; margin-bottom: 6px; }
+    .card-value {
+      font-size: 32px; font-weight: 700; letter-spacing: -1px;
+      color: var(--text-1);
+      font-variant-numeric: tabular-nums;
+      transition: color 0.3s;
+    }
+    .card-value.updated { color: var(--card-color, var(--accent)); }
+    .card-unit { font-size: 14px; color: var(--text-2); font-weight: 400; margin-left: 4px; }
+    .card-sub  { font-size: 11px; color: var(--text-3); margin-top: 8px; font-family: 'JetBrains Mono', monospace; }
+
+    /* ── Charts panel ─────────────────────────────────── */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 768px) { .charts-row { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chart-title { font-size: 13px; font-weight: 600; color: var(--text-1); margin-bottom: 16px; }
+    canvas { width: 100% !important; }
+
+    /* ── Log panel ─────────────────────────────────────── */
+    .log-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 32px;
+    }
+    .log-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .log-title { font-size: 13px; font-weight: 600; }
+    .log-clear {
+      font-size: 11px; color: var(--text-3); cursor: pointer;
+      background: none; border: none; padding: 4px 8px;
+      border-radius: 6px; transition: 0.2s;
+    }
+    .log-clear:hover { background: var(--bg-3); color: var(--text-2); }
+
+    #log-list {
+      height: 200px; overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--text-2); line-height: 1.9;
+    }
+    #log-list::-webkit-scrollbar { width: 4px; }
+    #log-list::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 4px; }
+
+    .log-entry { display: flex; gap: 12px; padding: 2px 0; }
+    .log-ts { color: var(--text-3); flex-shrink: 0; }
+    .log-msg.ok  { color: var(--green); }
+    .log-msg.err { color: var(--red); }
+    .log-msg.info{ color: var(--accent); }
+
+    /* ── Stats row ─────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .stat-box {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-box .val { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat-box .lbl { font-size: 11px; color: var(--text-2); margin-top: 4px; }
+
+    /* ── Config banner ──────────────────────────────────── */
+    .config-banner {
+      background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1));
+      border: 1px solid rgba(99,102,241,0.2);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 32px;
+      display: flex; align-items: flex-start; gap: 16px;
+    }
+    .config-banner .icon { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
+    .config-banner h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .config-banner p  { font-size: 12px; color: var(--text-2); line-height: 1.6; }
+    .config-banner code {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(255,255,255,0.08);
+      padding: 2px 6px; border-radius: 4px;
+      font-size: 11px;
+    }
+    #server-url-input {
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--bg-0);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--text-1);
+      font-size: 12px;
+      width: 320px;
+      margin-top: 8px;
+    }
+    #connect-btn {
+      background: linear-gradient(135deg, var(--accent), var(--accent-g));
+      border: none; border-radius: 8px;
+      padding: 8px 16px; color: white;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      margin-left: 8px; transition: opacity 0.2s;
+    }
+    #connect-btn:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div class="logo-text">
+      <h1>HC-POS Live Monitor</h1>
+      <p>ESP32 → Flask sensor stream</p>
+    </div>
+  </div>
+  <div class="conn-badge" id="conn-badge">
+    <div class="conn-dot" id="conn-dot"></div>
+    <span id="conn-label">Disconnected</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Config ─────────────────────────────────────── -->
+  <div class="config-banner">
+    <div class="icon">🔌</div>
+    <div>
+      <h3>Connect to Flask server</h3>
+      <p>Enter your Flask server URL. For local use: <code>http://localhost:5000</code></p>
+      <div style="margin-top:10px; display:flex; align-items:center; gap:0; flex-wrap:wrap;">
+        <input id="server-url-input" type="text" value="http://localhost:5000" placeholder="http://localhost:5000" />
+        <button id="connect-btn" onclick="connectSSE()">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Stats row ──────────────────────────────────── -->
+  <p class="section-label">Session Overview</p>
+  <div class="stats-row">
+    <div class="stat-box">
+      <div class="val" id="total-readings" style="color: var(--accent)">0</div>
+      <div class="lbl">Total Readings</div>
+    </div>
+    <div class="stat-box">
+      <div class="val" id="reading-rate" style="color: var(--green)">0</div>
+      <div class="lbl">Readings/min</div>
+    </div>
+    <div class="stat-box">
+      <div class="val" id="raw-rows" style="color: var(--solar)">—</div>
+      <div class="lbl">Raw CSV Rows</div>
+    </div>
+    <div class="stat-box">
+      <div class="val" id="nilm-rows" style="color: var(--current)">—</div>
+      <div class="lbl">NILM CSV Rows</div>
+    </div>
+    <div class="stat-box">
+      <div class="val" id="last-ts" style="font-size:14px; color: var(--text-2)">—</div>
+      <div class="lbl">Last Timestamp</div>
+    </div>
+  </div>
+
+  <!-- ── Metric cards ───────────────────────────────── -->
+  <p class="section-label">Live Readings</p>
+  <div class="cards-grid">
+    <div class="card" style="--card-color: var(--voltage)">
+      <div class="card-icon">🔋</div>
+      <div class="card-label">Grid Voltage</div>
+      <div class="card-value" id="val-voltage">—<span class="card-unit">V</span></div>
+      <div class="card-sub" id="sub-voltage">Waiting for data…</div>
+    </div>
+    <div class="card" style="--card-color: var(--current)">
+      <div class="card-icon">〰️</div>
+      <div class="card-label">Current</div>
+      <div class="card-value" id="val-current">—<span class="card-unit">A</span></div>
+      <div class="card-sub" id="sub-current">Waiting for data…</div>
+    </div>
+    <div class="card" style="--card-color: var(--power)">
+      <div class="card-icon">⚡</div>
+      <div class="card-label">Active Power</div>
+      <div class="card-value" id="val-power">—<span class="card-unit">W</span></div>
+      <div class="card-sub" id="sub-power">Waiting for data…</div>
+    </div>
+    <div class="card" style="--card-color: var(--solar)">
+      <div class="card-icon">☀️</div>
+      <div class="card-label">Solar Power</div>
+      <div class="card-value" id="val-solar">—<span class="card-unit">W</span></div>
+      <div class="card-sub" id="sub-solar">Waiting for data…</div>
+    </div>
+    <div class="card" style="--card-color: var(--battery)">
+      <div class="card-icon">🔌</div>
+      <div class="card-label">Battery SOC</div>
+      <div class="card-value" id="val-battery">—<span class="card-unit">%</span></div>
+      <div class="card-sub" id="sub-battery">Waiting for data…</div>
+    </div>
+    <div class="card" style="--card-color: var(--text-2)">
+      <div class="card-icon">📡</div>
+      <div class="card-label">Frequency / PF</div>
+      <div class="card-value" id="val-freq">—<span class="card-unit">Hz</span></div>
+      <div class="card-sub" id="sub-pf">Power Factor: —</div>
+    </div>
+  </div>
+
+  <!-- ── Charts ─────────────────────────────────────── -->
+  <p class="section-label">Trends (last 60 readings)</p>
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-title">⚡ Active Power (W) + ☀️ Solar Power (W)</div>
+      <canvas id="chart-power" height="160"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">🔋 Voltage (V) &amp; 〰️ Current (A)</div>
+      <canvas id="chart-vi" height="160"></canvas>
+    </div>
+  </div>
+
+  <!-- ── Log ────────────────────────────────────────── -->
+  <div class="log-card">
+    <div class="log-header">
+      <span class="log-title">📋 Event Log</span>
+      <button class="log-clear" onclick="clearLog()">Clear</button>
+    </div>
+    <div id="log-list"></div>
+  </div>
+
+</main>
+
+<!-- Chart.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// ── State ──────────────────────────────────────────────────────
+let evtSource = null;
+let totalReadings = 0;
+let readingTimestamps = [];
+const MAX_POINTS = 60;
+
+const powerBuf  = [];
+const solarBuf  = [];
+const voltageBuf= [];
+const currentBuf= [];
+const labelBuf  = [];
+
+// ── Charts setup ───────────────────────────────────────────────
+const chartDefaults = {
+  responsive: true,
+  animation: false,
+  plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+  scales: {
+    x: { ticks: { color: '#475569', maxTicksLimit: 6, font: { size: 10 } },
+         grid: { color: 'rgba(255,255,255,0.04)' } },
+    y: { ticks: { color: '#475569', font: { size: 10 } },
+         grid: { color: 'rgba(255,255,255,0.04)' } },
+  },
+};
+
+const powerChart = new Chart(document.getElementById('chart-power').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: labelBuf,
+    datasets: [
+      { label: 'Power (W)',       data: powerBuf,   borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', tension: 0.4, fill: true, pointRadius: 0, borderWidth: 2 },
+      { label: 'Solar (W)',       data: solarBuf,   borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', tension: 0.4, fill: true, pointRadius: 0, borderWidth: 2 },
+    ],
+  },
+  options: chartDefaults,
+});
+
+const viChart = new Chart(document.getElementById('chart-vi').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: labelBuf,
+    datasets: [
+      { label: 'Voltage (V)',  data: voltageBuf,  borderColor: '#a78bfa', tension: 0.4, fill: false, pointRadius: 0, borderWidth: 2, yAxisID: 'y' },
+      { label: 'Current (A)',  data: currentBuf,  borderColor: '#22d3ee', tension: 0.4, fill: false, pointRadius: 0, borderWidth: 2, yAxisID: 'y2' },
+    ],
+  },
+  options: {
+    ...chartDefaults,
+    scales: {
+      ...chartDefaults.scales,
+      y:  { ...chartDefaults.scales.y, position: 'left',  title: { display: true, text: 'V', color: '#a78bfa', font:{size:10} } },
+      y2: { ...chartDefaults.scales.y, position: 'right', title: { display: true, text: 'A', color: '#22d3ee', font:{size:10} }, grid: { drawOnChartArea: false } },
+    },
+  },
+});
+
+// ── Helpers ────────────────────────────────────────────────────
+function fmtTime(ts) {
+  if (!ts) return new Date().toLocaleTimeString();
+  try { return new Date(ts).toLocaleTimeString(); } catch { return ts; }
+}
+
+function pushBuf(buf, val) {
+  buf.push(val ?? null);
+  if (buf.length > MAX_POINTS) buf.shift();
+}
+
+function numOrDash(v, digits = 1) {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = parseFloat(v);
+  return isNaN(n) ? '—' : n.toFixed(digits);
+}
+
+function flashUpdate(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('updated');
+  setTimeout(() => el.classList.remove('updated'), 600);
+}
+
+function addLog(msg, type = 'info') {
+  const list = document.getElementById('log-list');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-ts">${new Date().toLocaleTimeString()}</span>
+                     <span class="log-msg ${type}">${msg}</span>`;
+  list.prepend(entry);
+  // Keep log capped at 200 entries
+  while (list.children.length > 200) list.removeChild(list.lastChild);
+}
+
+function clearLog() { document.getElementById('log-list').innerHTML = ''; }
+
+// ── Readings/min calculator ────────────────────────────────────
+function updateRate() {
+  const now = Date.now();
+  readingTimestamps = readingTimestamps.filter(t => now - t < 60000);
+  document.getElementById('reading-rate').textContent = readingTimestamps.length;
+}
+
+// ── Status poll (every 5 s) ────────────────────────────────────
+let serverBase = 'http://localhost:5000';
+function pollStatus() {
+  fetch(`${serverBase}/status`)
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('raw-rows').textContent  = d.raw_csv_rows  ?? '—';
+      document.getElementById('nilm-rows').textContent = d.nilm_csv_rows ?? '—';
+    })
+    .catch(() => {});
+}
+
+// ── SSE connection ─────────────────────────────────────────────
+function connectSSE() {
+  serverBase = (document.getElementById('server-url-input').value || 'http://localhost:5000').replace(/\/$/, '');
+
+  if (evtSource) { evtSource.close(); evtSource = null; }
+
+  addLog(`Connecting to ${serverBase}/stream…`, 'info');
+
+  evtSource = new EventSource(`${serverBase}/stream`);
+
+  evtSource.onopen = () => {11111111111111111141
+    document.getElementById('conn-badge').classList.add('live');
+    document.getElementById('conn-label').textContent = 'Live';
+    addLog('✅ SSE stream connected', 'ok');
+    pollStatus();
+  };
+
+  evtSource.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    if (data.event === 'connected') { addLog('🔗 Stream handshake OK', 'ok'); return; }
+
+    // Update counters
+    totalReadings++;
+    readingTimestamps.push(Date.now());
+    document.getElementById('total-readings').textContent = totalReadings;
+    document.getElementById('last-ts').textContent = fmtTime(data.timestamp).split(' ').pop();
+    updateRate();
+
+    // ── Update metric cards ──
+    const fields = [
+      ['val-voltage', data.voltage_v,       1, 'sub-voltage',  `Frequency: ${numOrDash(data.frequency_hz, 1)} Hz`],
+      ['val-current', data.current_a,       3, 'sub-current',  `Power factor: ${numOrDash(data.power_factor, 2)}`],
+      ['val-power',   data.power_w,         1, 'sub-power',    data.nilm_window_written ? '✓ NILM window captured' : 'No waveform'],
+      ['val-solar',   data.solar_power_w,   1, 'sub-solar',    'From solar panel'],
+      ['val-battery', data.battery_soc_pct, 1, 'sub-battery',  getBatteryStatus(data.battery_soc_pct)],
+      ['val-freq',    data.frequency_hz,    2, 'sub-pf',       `Power Factor: ${numOrDash(data.power_factor, 3)}`],
+    ];
+
+    for (const [valId, val, digits, subId, subText] of fields) {
+      const el = document.getElementById(valId);
+      if (el) {
+        const unit = el.querySelector('.card-unit');
+        el.childNodes[0].textContent = numOrDash(val, digits);
+        if (unit) el.appendChild(unit);
+        flashUpdate(valId);
+      }
+      const sub = document.getElementById(subId);
+      if (sub) sub.textContent = subText;
+    }
+
+    // ── Update charts ──
+    const lbl = fmtTime(data.timestamp);
+    pushBuf(labelBuf,   lbl);
+    pushBuf(powerBuf,   data.power_w    ?? null);
+    pushBuf(solarBuf,   data.solar_power_w ?? null);
+    pushBuf(voltageBuf, data.voltage_v  ?? null);
+    pushBuf(currentBuf, data.current_a  ?? null);
+
+    powerChart.update('none');
+    viChart.update('none');
+
+    // ── Log entry ──
+    addLog(`V=${numOrDash(data.voltage_v)}V  I=${numOrDash(data.current_a,3)}A  P=${numOrDash(data.power_w)}W  ☀️${numOrDash(data.solar_power_w)}W`, 'ok');
+  };
+
+  evtSource.onerror = () => {
+    document.getElementById('conn-badge').classList.remove('live');
+    document.getElementById('conn-label').textContent = 'Disconnected';
+    addLog('❌ SSE stream error — retrying…', 'err');
+  };
+
+  // Poll status every 5 s
+  setInterval(pollStatus, 5000);
+}
+
+function getBatteryStatus(soc) {
+  if (soc === null || soc === undefined) return '—';
+  const n = parseFloat(soc);
+  if (isNaN(n)) return '—';
+  if (n > 80) return '🟢 Charged';
+  if (n > 40) return '🟡 Normal';
+  return '🔴 Low — charging needed';
+}
+
+// Auto-connect on load
+window.addEventListener('load', () => {
+  addLog('Dashboard ready. Click Connect or auto-connecting…', 'info');
+  connectSSE();
+});
+</script>
+</body>
+</html>

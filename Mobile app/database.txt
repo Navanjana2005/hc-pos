@@ -1,0 +1,245 @@
+-- ============================================================
+-- HC-POS / Genesis Grid — Supabase Schema
+-- Converted from plain Postgres to Supabase conventions:
+--   - auth.users integration (RLS ownership)
+--   - Row Level Security on every table
+--   - Realtime enabled on tables the Flutter app needs to watch live
+--   - auto-updating updated_at via moddatetime extension
+--
+-- Assumption: single household, one owning Supabase Auth user.
+-- The Pi-side agent should connect using the SERVICE_ROLE key,
+-- which bypasses RLS automatically — no special policies needed
+-- for it. The Flutter app uses the anon/authenticated key and is
+-- restricted by the policies below to rows owned by auth.uid().
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 0. EXTENSIONS
+-- ------------------------------------------------------------
+create extension if not exists "pgcrypto";
+create extension if not exists "moddatetime" schema extensions;
+
+-- ------------------------------------------------------------
+-- 1. DEVICES — registry of ESP32 nodes
+-- ------------------------------------------------------------
+create type device_type as enum ('solar_mgmt', 'distribution', 'room_socket', 'central');
+
+create table devices (
+    device_id        bigint generated always as identity primary key,
+    user_id          uuid not null references auth.users(id) on delete cascade default auth.uid(),
+    device_name      varchar(100) not null,
+    device_type      device_type not null,
+    room_location    varchar(100),
+    mqtt_topic       varchar(150) unique,
+    firmware_version varchar(20),
+    is_active        boolean default true,
+    created_at       timestamptz default now(),
+    last_seen_at     timestamptz
+);
+
+alter table devices enable row level security;
+
+create policy "Owner can manage own devices"
+    on devices for all
+    using (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+-- 2. APPLIANCES — linked to room/socket devices
+-- ------------------------------------------------------------
+create table appliances (
+    appliance_id        bigint generated always as identity primary key,
+    device_id           bigint not null references devices(device_id) on delete cascade,
+    appliance_name       varchar(100) not null,
+    nilm_predicted_type  varchar(50),
+    rated_power_w        numeric(8,2),
+    priority_level        smallint default 3 check (priority_level between 1 and 5),
+    is_controllable       boolean default true,
+    created_at            timestamptz default now()
+);
+
+alter table appliances enable row level security;
+
+create policy "Owner can manage own appliances"
+    on appliances for all
+    using (
+        auth.uid() = (select user_id from devices d where d.device_id = appliances.device_id)
+    )
+    with check (
+        auth.uid() = (select user_id from devices d where d.device_id = appliances.device_id)
+    );
+
+-- ------------------------------------------------------------
+-- 3. SYSTEM_STATE — single-row "latest known" snapshot the app reads
+-- ------------------------------------------------------------
+create table system_state (
+    id                      smallint primary key default 1 check (id = 1),
+    user_id                 uuid not null references auth.users(id) on delete cascade default auth.uid(),
+    battery_soc_pct         numeric(5,2),
+    battery_health_pct      numeric(5,2),
+    solar_generation_w      numeric(10,2),
+    whole_house_power_w     numeric(10,2),
+    current_power_source    varchar(10) check (current_power_source in ('grid', 'solar', 'battery')),
+    automation_mode         varchar(20) default 'auto' check (automation_mode in ('auto', 'manual_approval')),
+    emergency_stop_active   boolean default false,
+    updated_at              timestamptz default now()
+);
+
+create trigger handle_updated_at before update on system_state
+    for each row execute procedure extensions.moddatetime(updated_at);
+
+alter table system_state enable row level security;
+
+create policy "Owner can view/update own system state"
+    on system_state for all
+    using (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+
+-- Seed row: run once per household after the owning user signs up,
+-- substituting their auth.users id, e.g.:
+-- insert into system_state (id, user_id) values (1, '00000000-0000-0000-0000-000000000000');
+
+-- ------------------------------------------------------------
+-- 4. TELEMETRY_LOG — processed periodic readings
+-- ------------------------------------------------------------
+create table telemetry_log (
+    id              bigint generated always as identity primary key,
+    device_id       bigint references devices(device_id) on delete set null,
+    appliance_id    bigint references appliances(appliance_id) on delete set null,
+    metric_type     varchar(50) not null,
+    value           numeric(12,4) not null,
+    recorded_at     timestamptz not null default now()
+);
+create index idx_telemetry_device_time on telemetry_log (device_id, recorded_at desc);
+create index idx_telemetry_metric_time on telemetry_log (metric_type, recorded_at desc);
+
+alter table telemetry_log enable row level security;
+
+create policy "Owner can read own telemetry"
+    on telemetry_log for select
+    using (
+        auth.uid() = (select user_id from devices d where d.device_id = telemetry_log.device_id)
+    );
+
+-- Inserts come from the Pi agent via the service_role key (bypasses RLS),
+-- so no insert policy is defined for the authenticated app role.
+
+-- ------------------------------------------------------------
+-- 5. FORECASTS — model outputs, with actual value backfilled later
+-- ------------------------------------------------------------
+create table forecasts (
+    id              bigint generated always as identity primary key,
+    user_id         uuid not null references auth.users(id) on delete cascade default auth.uid(),
+    forecast_type   varchar(20) not null check (forecast_type in ('solar', 'consumption')),
+    model_version   varchar(30),
+    horizon_start   timestamptz not null,
+    horizon_end     timestamptz not null,
+    predicted_value numeric(12,4) not null,
+    actual_value    numeric(12,4),
+    created_at      timestamptz default now()
+);
+create index idx_forecasts_type_time on forecasts (forecast_type, horizon_start);
+
+alter table forecasts enable row level security;
+
+create policy "Owner can read own forecasts"
+    on forecasts for select
+    using (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+-- 6. DECISIONS — AI agent's decisions, with explainability + human override
+-- ------------------------------------------------------------
+create type decision_type as enum (
+    'switch_to_solar', 'charge_battery', 'disable_appliance',
+    'postpone_load', 'send_alert'
+);
+create type decision_status as enum (
+    'proposed', 'approved', 'rejected', 'executed', 'confirmed', 'failed'
+);
+
+create table decisions (
+    id                  bigint generated always as identity primary key,
+    user_id             uuid not null references auth.users(id) on delete cascade default auth.uid(),
+    decision_type       decision_type not null,
+    target_device_id    bigint references devices(device_id),
+    target_appliance_id bigint references appliances(appliance_id),
+    reasoning           jsonb,
+    status              decision_status not null default 'proposed',
+    decided_by          varchar(10) default 'ai' check (decided_by in ('ai', 'user')),
+    created_at          timestamptz default now(),
+    updated_at          timestamptz default now()
+);
+create index idx_decisions_status on decisions (status, created_at desc);
+
+create trigger handle_updated_at before update on decisions
+    for each row execute procedure extensions.moddatetime(updated_at);
+
+alter table decisions enable row level security;
+
+-- App user can view all decisions, but only update status
+-- (e.g. approve/reject) — not fabricate new ones or edit reasoning.
+create policy "Owner can view own decisions"
+    on decisions for select
+    using (auth.uid() = user_id);
+
+create policy "Owner can approve/reject own decisions"
+    on decisions for update
+    using (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+-- 7. EXECUTION_LOG — dispatch + ESP32 acknowledgement tracking
+-- ------------------------------------------------------------
+create table execution_log (
+    id              bigint generated always as identity primary key,
+    decision_id     bigint not null references decisions(id) on delete cascade,
+    command_sent    jsonb,
+    dispatched_at   timestamptz default now(),
+    acknowledged_at timestamptz,
+    ack_status      varchar(20) check (ack_status in ('pending', 'success', 'failed', 'timeout'))
+);
+create index idx_execution_decision on execution_log (decision_id);
+
+alter table execution_log enable row level security;
+
+create policy "Owner can read own execution log"
+    on execution_log for select
+    using (
+        auth.uid() = (select user_id from decisions dec where dec.id = execution_log.decision_id)
+    );
+
+-- ------------------------------------------------------------
+-- 8. ALERTS
+-- ------------------------------------------------------------
+create table alerts (
+    id                  bigint generated always as identity primary key,
+    user_id             uuid not null references auth.users(id) on delete cascade default auth.uid(),
+    alert_type          varchar(50) not null,
+    severity            varchar(10) check (severity in ('info', 'warning', 'critical')),
+    message             text not null,
+    related_decision_id bigint references decisions(id),
+    acknowledged        boolean default false,
+    created_at          timestamptz default now()
+);
+create index idx_alerts_unack on alerts (acknowledged, created_at desc);
+
+alter table alerts enable row level security;
+
+create policy "Owner can view own alerts"
+    on alerts for select
+    using (auth.uid() = user_id);
+
+create policy "Owner can acknowledge own alerts"
+    on alerts for update
+    using (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+-- 9. REALTIME — let the Flutter app subscribe to live changes
+--    instead of polling. Add these tables to the built-in
+--    supabase_realtime publication.
+-- ------------------------------------------------------------
+alter publication supabase_realtime add table system_state;
+alter publication supabase_realtime add table decisions;
+alter publication supabase_realtime add table alerts;
+alter publication supabase_realtime add table execution_log;

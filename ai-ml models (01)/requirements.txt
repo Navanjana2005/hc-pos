@@ -1,0 +1,32 @@
+# HC-POS AI Backend dependencies
+# Install with:  pip install -r requirements.txt
+
+# API server (AI agent + optimizer)
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+
+# ESP32 sensor ingestion server (runs on port 5000, separate from FastAPI)
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Database
+supabase>=2.4.0
+
+# AI Agent
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-mistralai>=0.1.0
+langchain-nvidia-ai-endpoints>=1.4.3
+
+# MILP optimizer
+pulp>=2.8.0
+
+# ML / data
+tensorflow>=2.16.0
+numpy>=1.26.0
+pandas>=2.2.0
+joblib>=1.4.0
+scikit-learn>=1.4.0
+
+# Utilities
+python-dotenv>=1.0.0

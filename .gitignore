@@ -1,0 +1,95 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  HC-POS — Human-Centric Power Orchestration System
+#  .gitignore
+# ════════════════════════════════════════════════════════════════════════════
+
+# ─── Secrets & Credentials ────────────────────────────────────────────────────
+# NEVER commit real API keys or database credentials.
+.env
+*.env
+!*.env.example
+*.key
+*.pem
+secrets/
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+develop-eggs/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─── Live sensor data files (auto-generated at runtime, not source code) ───────
+ai-ml models (01)/live_sensor_raw.csv
+ai-ml models (01)/live_sensor_stream.csv
+
+# ─── Log files ────────────────────────────────────────────────────────────────
+*.log
+logs/
+ai-ml models (01)/esp32_receiver.log
+
+# ─── Jupyter Notebooks ────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── Flutter / Dart ───────────────────────────────────────────────────────────
+Mobile app/project1/.dart_tool/
+Mobile app/project1/build/
+Mobile app/project1/.flutter-plugins
+Mobile app/project1/.flutter-plugins-dependencies
+Mobile app/project1/*.iml
+Mobile app/project1/android/.gradle/
+Mobile app/project1/android/local.properties
+Mobile app/project1/ios/Pods/
+Mobile app/project1/.packages
+
+# ─── IDE & Editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Academic & Research Papers (INCLUDED for GitHub publication) ─────────────
+# Track the unified research paper, symposium PDF, and academic reports:
+!HC_POS_Research_Paper.md
+!Project_Showcase_Symposium_Paper_Title.pdf
+!HC_POS_Software_Architecture_Report.md
+!HC_POS_Chapter3_and_Chapter5_Report_Details.md
+
+# ─── Academic Internal Templates (LaTeX / Docx templates) ─────────────────────
+Symposium Template/
+Hardware Description.docx
+~$*.docx
+
+# ─── ESP32 test/simulator scripts (not part of the production firmware) ────────
+ESP32 backend/espcode_test.py
+
+# ─── Large training data CSVs ──────────────────────────────────────────────────
+# Uncomment these if you want to exclude training datasets from the repo.
+# Keep them if you want collaborators to be able to retrain models from scratch.
+# ai-ml models (01)/solar_energy_prediction_dataset.csv
+# ai-ml models (01)/synthetic_consumption_history.csv
+# ai-ml models (01)/train_data.csv
+# ai-ml models (01)/test_data.csv
+
+# ─── ML Model Binary Files (optional — uncomment to use Git LFS instead) ───────
+# If your .keras model files are large, consider using Git LFS:
+#   git lfs track "*.keras"
+#   git lfs track "*.pkl"
+# *.keras
+# *.pkl
